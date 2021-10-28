@@ -5,6 +5,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import random
+import seaborn as sns
+import time
+import os
+import datetime
 
 
 #Function to Generate Customer Profiles
@@ -148,63 +152,57 @@ customer_profiles_table
 
 # Create function that will generate transaction data
 
-def generate_transactions_table(customer_profile, start_date ='2018-04-01', nb_days = 10):
-
+def generate_transactions_table(customer_profile, start_date = "2018-04-01", nb_days = 10):
+    
     customer_transactions = []
-
+    
     random.seed(customer_profile.CUSTOMER_ID)
     np.random.seed(customer_profile.CUSTOMER_ID)
-
-    #For all days
+    
+    # For all days
     for day in range(nb_days):
-
-      # Random number of transactions for that day
-      nb_tx = np.random.poisson(customer_profile.mean_nb_tx_per_day)
-
-      #If nb_tx positive, let us generate transactions
-      if nb_tx>0:
-
-        for tx in range(nb_tx):
-
-          # Time of transaction: Around noon, std 20000 seconds. This choice aims at stimulating the fact that
-          # most transactions happen during the day.
-          time_tx = int(np.random.normal(86400/2, 20000))
-
-          # If transaction time between 0 and 86400, let us keep it, otherwise, let us discard it
-          if (time_tx>0) and (time_tx<86400):
-
-            #Amount is drawn from a normal distribution
-            amount = np.random.normal(customer_profile.mean_amount, customer_profile.std_amount)
-
-          # If amount negative, draw from a uniform distribution
-            if amount<0:
-              amount = np.random.uniform(0, customer_profile.mean_amount*2)
-
-            amount = np.round(amount, decimals=2)
-
-            if len(customer_profile.available_terminals)>0:
-
-              terminal_id = random.choice(customer_profile.avaialable_terminals)
-
-              customer_transactions.append([time_tx+day*86400, day, customer_profile.CUSTOMER_ID,
-                                            terminal_id, amount])
-              
-      customer_transactions = pd.DataFrame(customer_transactions, columns=['TX_TIME_SECONDS', 'TX_TIME_DAYS', 'CUSTOMER_ID', 'TERMINAL_ID', 'TX_AMOUNT'])
-
-      if len(customer_transactions)>0:
-          customer_transactions['TX_DATETIME'] = pd.to_datetime(customer_transactions["TX_TIME_SECONDS"], unit='s', origin=start_date)
-          customer_transactions=customer_transactions[['TX_DATETIME', 'CUSTOMER_ID', 'TERMINAL_ID', 'TX_AMOUNT', 'TX_TIME_SECONDS', 'TX_TIME_DAYS']]
-
-      return customer_transactions
+        
+        # Random number of transactions for that day 
+        nb_tx = np.random.poisson(customer_profile.mean_nb_tx_per_day)
+        
+        # If nb_tx positive, let us generate transactions
+        if nb_tx>0:
+            
+            for tx in range(nb_tx):
+                
+                # Time of transaction: Around noon, std 20000 seconds. This choice aims at simulating the fact that 
+                # most transactions occur during the day.
+                time_tx = int(np.random.normal(86400/2, 20000))
+                
+                # If transaction time between 0 and 86400, let us keep it, otherwise, let us discard it
+                if (time_tx>0) and (time_tx<86400):
+                    
+                    # Amount is drawn from a normal distribution  
+                    amount = np.random.normal(customer_profile.mean_amount, customer_profile.std_amount)
+                    
+                    # If amount negative, draw from a uniform distribution
+                    if amount<0:
+                        amount = np.random.uniform(0,customer_profile.mean_amount*2)
+                    
+                    amount=np.round(amount,decimals=2)
+                    
+                    if len(customer_profile.available_terminals)>0:
+                        
+                        terminal_id = random.choice(customer_profile.available_terminals)
+                    
+                        customer_transactions.append([time_tx+day*86400, day,
+                                                      customer_profile.CUSTOMER_ID, 
+                                                      terminal_id, amount])
+            
+    customer_transactions = pd.DataFrame(customer_transactions, columns=['TX_TIME_SECONDS', 'TX_TIME_DAYS', 'CUSTOMER_ID', 'TERMINAL_ID', 'TX_AMOUNT'])
+    
+    if len(customer_transactions)>0:
+        customer_transactions['TX_DATETIME'] = pd.to_datetime(customer_transactions["TX_TIME_SECONDS"], unit='s', origin=start_date)
+        customer_transactions=customer_transactions[['TX_DATETIME','CUSTOMER_ID', 'TERMINAL_ID', 'TX_AMOUNT','TX_TIME_SECONDS', 'TX_TIME_DAYS']]
+    
+    return customer_transactions  
     
     
-    
-### TROUBLESHOOTING ###
-#type(customer_profiles_table.iloc[0])
-#Series.attrs(customer_profiles_table.iloc[0])
-#customer_profiles_table.iloc[0].available_terminals
-
-
 # EX) Generate transactions for the 1st customer, for 5 days, starting at the date 2018-04-01
 
 transaction_table_customer_0=generate_transactions_table(customer_profiles_table.iloc[0],
@@ -216,3 +214,222 @@ transaction_table_customer_0
 ## Gettin an error here saying "'Series' object has no attribute 'avaialable_terminals'"
 ## I think this is originating from the 'customer_profiles_table.iloc[0]' which is a pandas Series datatype
 ## Need to resolve error before continuing
+
+customer_profiles_table.iloc[0]
+
+# Generate Transactions for all customers
+
+transactions_df = customer_profiles_table.groupby('CUSTOMER_ID').apply(lambda x: generate_transactions_table(x.iloc[0], nb_days=5)).reset_index(drop=True)
+transactions_df
+    
+# Write a function to generate a larger dataset that will: 
+
+  ## take as inputs the number of desired customer, terminals and days, as well as starting date and radius r
+  ## return the generated customer terminal profiles table, and the DataFrame of transactions
+
+## NOTE: 'parallel_aply' of 'parallel' module used to speed up computations 
+##        replaces panda 'apply' function & allows distribution of computation on all available CPUs
+
+def generate_dataset(n_customers = 10000, n_terminals = 1000000, nb_days=90, start_date="2018-04-01", r=5):
+    
+    start_time=time.time()
+    customer_profiles_table = generate_customer_profiles_table(n_customers, random_state = 0)
+    print("Time to generate customer profiles table: {0:.2}s".format(time.time()-start_time))
+    
+    start_time=time.time()
+    terminal_profiles_table = generate_terminal_profiles_table(n_terminals, random_state = 1)
+    print("Time to generate terminal profiles table: {0:.2}s".format(time.time()-start_time))
+    
+    start_time=time.time()
+    x_y_terminals = terminal_profiles_table[['x_terminal_id','y_terminal_id']].values.astype(float)
+    customer_profiles_table['available_terminals'] = customer_profiles_table.apply(lambda x : get_list_terminals_within_radius(x, x_y_terminals=x_y_terminals, r=r), axis=1)
+    # With Pandarallel
+    #customer_profiles_table['available_terminals'] = customer_profiles_table.parallel_apply(lambda x : get_list_closest_terminals(x, x_y_terminals=x_y_terminals, r=r), axis=1)
+    customer_profiles_table['nb_terminals']=customer_profiles_table.available_terminals.apply(len)
+    print("Time to associate terminals to customers: {0:.2}s".format(time.time()-start_time))
+    
+    start_time=time.time()
+    transactions_df=customer_profiles_table.groupby('CUSTOMER_ID').apply(lambda x : generate_transactions_table(x.iloc[0], nb_days=nb_days)).reset_index(drop=True)
+    # With Pandarallel
+    #transactions_df=customer_profiles_table.groupby('CUSTOMER_ID').parallel_apply(lambda x : generate_transactions_table(x.iloc[0], nb_days=nb_days)).reset_index(drop=True)
+    print("Time to generate transactions: {0:.2}s".format(time.time()-start_time))
+    
+    # Sort transactions chronologically
+    transactions_df=transactions_df.sort_values('TX_DATETIME')
+    # Reset indices, starting from 0
+    transactions_df.reset_index(inplace=True,drop=True)
+    transactions_df.reset_index(inplace=True)
+    # TRANSACTION_ID are the dataframe indices, starting from 0
+    transactions_df.rename(columns = {'index':'TRANSACTION_ID'}, inplace = True)
+    
+    return (customer_profiles_table, terminal_profiles_table, transactions_df)
+ 
+    
+# Now, generate a dataset featuring 5000 customers, 10000 terminals & 183 days of transactions
+
+(customer_profiles_table, terminal_profiles_table, transactions_df)=\
+  generate_dataset(n_customers=5000,
+                   n_terminals=10000,
+                   nb_days=183,
+                   start_date="2018-04-01",
+                   r=5)
+
+
+transactions_df.shape
+
+transactions_df
+
+
+# Plot distribution of transactions amounts and transaction times
+
+%%capture
+
+distribution_amount_times_fig, ax = plt.subplots(1, 2, figsize=(18,4))
+
+amount_val = transactions_df[transactions_df.TX_TIME_DAYS<10]['TX_AMOUNT'].sample(n=10000).values
+time_val = transactions_df[transactions_df.TX_TIME_DAYS<10]['TX_TIME_SECONDS'].sample(n=10000).values
+
+sns.distplot(amount_val, ax=ax[0], color = 'r', hist=True, kde=False)
+ax[0].set_title('Distribution of Transaction Amounts', fontsize=14)
+ax[0].set_xlim([min(amount_val), max(amount_val)])
+ax[0].set(xlabel = "Amount", ylabel="Number of transactions")
+
+# Divide tim variables by 86400 to transform seconds to days in the plot
+sns.distplot(time_val/86400, ax=ax[1], color='b', bins=100, hist=True, kde=False)
+ax[1].set_title('Distribution of transaction times', fontsize=14)
+ax[1].set_xlim([min(time_val/86400), max(time_val/86400)])
+ax[1].set_xticks(range(10))
+ax[1].set(xlabel = "Time (days)", ylabel = "Number of Transactions")
+
+distribution_amount_times_fig
+
+
+### Detect Fraud Scenarios ###
+
+#Scenario 1: Any transaction over 220$
+#Scenario 2: 2 terminals randomly drawn every 2 days where any transactions on them in the following 28 days is fraud
+#Scenario 3: Every day a list of 3 customers is drawn, in the next 14 days, 1/3 of their transactions have their amount multiplied by 5 and marked as fraud
+
+
+def add_frauds(customer_profiles_table, terminal_profiles_table, transactions_df):
+
+  #By default, all transactions are genuine
+  transactions_df['TX_FRAUD']=0
+  transactions_df['TX_FRAUD_SCENARIO']=0
+
+  #SCENARIO 1
+  transactions_df.loc[transactions_df.TX_AMOUNT>220, 'TX_FRAUD']=1
+  transactions_df.loc[transactions_df.TX_AMOUNT>220, 'TX_FRAUD_SCENARIO']=1
+  nb_frauds_scenario_1=transactions_df.TX_FRAUD.sum()
+  print("Number of frauds from scenario 1: "+str(nb_frauds_scenario_1))
+
+  #SCENARIO 2
+  for day in range(transactions_df.TX_TIME_DAYS.max()):
+
+    compromised_terminals = terminal_profiles_table.TERMINAL_ID.sample(n=1, random_state=day)
+
+    compromised_transactions = transactions_df[(transactions_df.TX_TIME_DAYS>=day)&
+                                               (transactions_df.TX_TIME_DAYS<day+28)&
+                                               (transactions_df.TERMINAL_ID.isin(compromised_terminals))]
+    
+    transactions_df.loc[compromised_transactions.index, 'TX_FRAUD']=1
+    transactions_df.loc[compromised_transactions.index, 'TX_FRAUD_SCENARIO']=2
+  
+
+  nb_frauds_scenario_2=transactions_df.TX_FRAUD.sum()-nb_frauds_scenario_1
+  print("Number of frauds from scenario 2: "+str(nb_frauds_scenario_2))
+
+  # Scenario 3
+  for day in range(transactions_df.TX_TIME_DAYS.max()):
+        
+        compromised_customers = customer_profiles_table.CUSTOMER_ID.sample(n=3, random_state=day).values
+        
+        compromised_transactions=transactions_df[(transactions_df.TX_TIME_DAYS>=day) & 
+                                                    (transactions_df.TX_TIME_DAYS<day+14) & 
+                                                    (transactions_df.CUSTOMER_ID.isin(compromised_customers))]
+        
+        nb_compromised_transactions=len(compromised_transactions)
+        
+        
+        random.seed(day)
+        index_fauds = random.sample(list(compromised_transactions.index.values),k=int(nb_compromised_transactions/3))
+        
+        transactions_df.loc[index_fauds,'TX_AMOUNT']=transactions_df.loc[index_fauds,'TX_AMOUNT']*5
+        transactions_df.loc[index_fauds,'TX_FRAUD']=1
+        transactions_df.loc[index_fauds,'TX_FRAUD_SCENARIO']=3
+
+  nb_frauds_scenario_3=transactions_df.TX_FRAUD.sum()-nb_frauds_scenario_2-nb_frauds_scenario_1
+  print("Number of frauds from scenario 3: "+str(nb_frauds_scenario_3))
+    
+  return transactions_df                 
+
+
+%time transactions_df = add_frauds(customer_profiles_table, terminal_profiles_table, transactions_df)
+
+#Percentage of fraudulent transactions
+transactions_df.TX_FRAUD.mean()
+
+#Number of Fraudulent Transactions
+transactions_df.TX_FRAUD.sum()
+
+#transactions_df.head()
+
+## Check how the # of transactions, # of fraudulent transactions, and # of frauded cards varies on daily basis
+
+def get_stats(transactions_df):
+  #Number of transactions per day
+  nb_tx_per_day = transactions_df.groupby(['TX_TIME_DAYS'])['CUSTOMER_ID'].count()
+  #Number of fraudulent transactions per day
+  nb_fraud_per_day=transactions_df.groupby(['TX_TIME_DAYS'])['TX_FRAUD'].sum()
+  #Number of fraudulent cards per day 
+  nb_fraudcard_per_day=transactions_df[transactions_df['TX_FRAUD']>0].groupby(['TX_TIME_DAYS']).CUSTOMER_ID.nunique()
+
+  return (nb_tx_per_day, nb_fraud_per_day, nb_fraudcard_per_day)
+
+(nb_tx_per_day,nb_fraud_per_day,nb_fraudcard_per_day)=get_stats(transactions_df)
+
+n_days = len(nb_tx_per_day)
+tx_stats=pd.DataFrame({"value":pd.concat([nb_tx_per_day/50,nb_fraud_per_day, nb_fraudcard_per_day])})
+tx_stats['stat_type']=["nb_tx_per_day"]*n_days+["nb_fraud_per_day"]*n_days+["nb_fraudcard_per_day"]*n_days
+tx_stats=tx_stats.reset_index()
+
+%%capture
+
+sns.set(style='darkgrid')
+sns.set(font_scale=1.4)
+
+fraud_and_transactons_stats_fig=plt.gcf()
+
+fraud_and_transactons_stats_fig.set_size_inches(15, 8)
+
+sns_plot = sns.lineplot(x="TX_TIME_DAYS", y="value", data=tx_stats, hue="stat_type", hue_order=["nb_tx_per_day", "nb_fraud_per_day", "nb_fraudcard_per_day"], legend=False)
+
+sns_plot.set_title('Total transactions, and number of fraudulent transactions \n and number of frauded cards per day', fontsize=20)
+sns_plot.set(xlabel = "Number of days since beginning of data generation", ylabel = "Number")
+
+sns_plot.set_ylim([0, 300])
+
+labels_legend = ["# transactions per day (/50)", "# fraudulent txs per day", "# Fraudulent cards per day"]
+
+sns_plot.legend(loc='upper left',labels=labels_legend, bbox_to_anchor=(1.05, 1), fontsize=15)
+
+fraud_and_transactons_stats_fig
+
+### SAVING the dataset
+
+DIR_OUTPUT = "./simulated-data-raw/data"
+
+if not os.path.exists(DIR_OUTPUT):
+  os.makedirs(DIR_OUTPUT)
+
+start_date = datetime.datetime.strptime("2018-04-01", "%Y-%m-%d")
+
+for day in range(transactions_df.TX_TIME_DAYS.max()+1):
+
+  transactions_day=transactions_df[transactions_df.TX_TIME_DAYS==day].sort_values('TX_TIME_SECONDS')
+
+  date = start_date + datetime.timedelta(days=day)
+  filename_output=date.strftime("%Y-%m-%d")+'.pkl'
+
+  #PROTOCOL required for Google Colab
+  transactions_day.to_pickle(DIR_OUTPUT+filename_output, protocol=4)
